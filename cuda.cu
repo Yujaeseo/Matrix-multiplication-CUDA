@@ -1,12 +1,16 @@
 #include <iostream>
 #include <chrono>
+#include <random>
 using namespace std;
 
-typedef struct Matrix
+#define DATA_TYPE int
+
+typedef struct Matrix_multiplication
 {
 	//Matrix(): ROW_X(4096), COL_X(4096), ROW_Y(4096), COL_Y(4096){}
-	Matrix(): ROW_X(3999), COL_X(3999), ROW_Y(3999), COL_Y(3999){}
-	~Matrix(){	
+	Matrix_multiplication(): ROW_X(3999), COL_X(3999), ROW_Y(3999), COL_Y(3999){initialize();}
+	Matrix_multiplication(int input_ROW_X, int input_COL_X, int input_ROW_Y, int input_COL_Y): ROW_X(input_ROW_X), COL_X(input_COL_X), ROW_Y(input_ROW_Y), COL_Y(input_COL_Y){initialize();}
+	~Matrix_multiplication(){	
 		delete [] h_X;
 		delete [] h_Y;
 		delete [] h_Z;
@@ -16,25 +20,31 @@ typedef struct Matrix
 		cudaFree(d_Z);
 	}
 
-	float *d_X;
-	float *d_Y;
-	float *d_Z;
-	float *h_X;
-	float *h_Y; 
-	float *h_Z;
+	void initialize(){
+		h_X = new DATA_TYPE[ROW_X * COL_X];
+		h_Y = new DATA_TYPE[ROW_Y * COL_Y];
+		h_Z = new DATA_TYPE[COL_X * ROW_Y];
+	}
+
+	DATA_TYPE *d_X;
+	DATA_TYPE *d_Y;
+	DATA_TYPE *d_Z;
+	DATA_TYPE *h_X;
+	DATA_TYPE *h_Y; 
+	DATA_TYPE *h_Z;
 
 	int ROW_X;
 	int COL_X;
 	int ROW_Y; 
 	int COL_Y;
-} Matrix;
+} Matrix_multiplication;
 
 __global__
-void matrix_multiplication
+void naive_matrix_multiplication
 (
-	float * d_X,
- 	float * d_Y,
- 	float * d_Z,
+	DATA_TYPE * d_X,
+ 	DATA_TYPE * d_Y,
+ 	DATA_TYPE * d_Z,
  	unsigned int width_X,
  	unsigned int width_Z, 
  	unsigned int length_Z
@@ -46,7 +56,7 @@ void matrix_multiplication
 	if(global_th_id >= length_Z)
 		return;
 
-	float temp = 0;
+	DATA_TYPE temp = 0;
 	int index_X = width_X * (global_th_id / width_Z);
 	int index_Y = global_th_id % width_Z;
 
@@ -62,14 +72,14 @@ void matrix_multiplication
 __global__
 void tiled_matrix_multiplication
 (
-	float *d_X,
-	float *d_Y,
-	float *d_Z,
+	DATA_TYPE *d_X,
+	DATA_TYPE *d_Y,
+	DATA_TYPE *d_Z,
 	int width,
 	int width_Z
 ){
-	__shared__ float X_tile[32][32];
-	__shared__ float Y_tile[32][32];
+	__shared__ DATA_TYPE X_tile[32][32];
+	__shared__ DATA_TYPE Y_tile[32][32];
 	
 	int t_row = threadIdx.y; 
 	int t_col = threadIdx.x;
@@ -77,7 +87,7 @@ void tiled_matrix_multiplication
 	int row = blockIdx.y * blockDim.y + threadIdx.y;
 	int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-	float acc_result = 0;
+	DATA_TYPE acc_result = 0;
 
 	for (int i = 0; i < (width + width_tile - 1) / width_tile; i++){
 		X_tile[t_row][t_col] = d_X[row * width + i * width_tile + t_col];
@@ -93,22 +103,78 @@ void tiled_matrix_multiplication
 	d_Z[row * width_Z + col] = acc_result;
 }
 
-void call_naive_matrix_muliplication_kernel(Matrix* matrix){
-	const int THREADS_PER_BLOCK = 1024;
-	const int THREAD_BLOCKS = (matrix->ROW_X * matrix->COL_Y + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+void matrix_data_transfer_to_device(Matrix_multiplication* matrix_mult){
 
-	matrix_multiplication<<<THREAD_BLOCKS, THREADS_PER_BLOCK>>>(matrix->d_X, matrix->d_Y, matrix->d_Z, matrix->COL_X, matrix->COL_Y, matrix->ROW_X * matrix->COL_Y);
+	const int ROW_X = matrix_mult->ROW_X;
+	const int COL_X = matrix_mult->COL_X;
+	const int ROW_Y = matrix_mult->ROW_Y;
+	const int COL_Y = matrix_mult->COL_Y;
+
+	// ALLOCATE MEMORY TO DEVICE
+	cudaMalloc((void**) &(matrix_mult->d_X), sizeof(DATA_TYPE) * ROW_X * COL_X);
+	cudaMalloc((void**) &(matrix_mult->d_Y), sizeof(DATA_TYPE) * ROW_Y * COL_Y);
+	cudaMalloc((void**) &(matrix_mult->d_Z), sizeof(DATA_TYPE) * ROW_X * COL_Y);
+
+	// COPY MEMORY FROM HOST TO DEVICE
+	cudaMemcpy(matrix_mult->d_X, matrix_mult->h_X, sizeof(DATA_TYPE) * ROW_X * COL_X, cudaMemcpyDefault);
+	cudaMemcpy(matrix_mult->d_Y, matrix_mult->h_Y, sizeof(DATA_TYPE) * ROW_Y * COL_Y, cudaMemcpyDefault);
+	cudaMemcpy(matrix_mult->d_Z, matrix_mult->h_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
+}
+
+void call_naive_matrix_muliplication_kernel(Matrix_multiplication* matrix_mult){
+	const int THREADS_PER_BLOCK = 1024;
+	const int THREAD_BLOCKS = (matrix_mult->ROW_X * matrix_mult->COL_Y + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+	naive_matrix_multiplication<<<THREAD_BLOCKS, THREADS_PER_BLOCK>>>(matrix_mult->d_X, matrix_mult->d_Y, matrix_mult->d_Z, matrix_mult->COL_X, matrix_mult->COL_Y, matrix_mult->ROW_X * matrix_mult->COL_Y);
 	cudaDeviceSynchronize();
 }
 
-void call_tiled_matrix_multiplication_kernel(Matrix* matrix){
+void call_tiled_matrix_multiplication_kernel(Matrix_multiplication* matrix_mult){
 	// const int THREADS_PER_BLOCK = 1024;
 	// const int THREAD_BLOCKS = (matrix->ROW_X * matrix->COL_Y + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-	dim3 blocks((matrix->ROW_X + 31) /32, (matrix->COL_Y + 31) /32);
+	dim3 blocks((matrix_mult->ROW_X + 31) /32, (matrix_mult->COL_Y + 31) /32);
 	dim3 threads(32, 32);
 
-	tiled_matrix_multiplication<<<blocks, threads>>>(matrix->d_X, matrix->d_Y, matrix->d_Z, matrix->COL_X, matrix->COL_Y);
+	tiled_matrix_multiplication<<<blocks, threads>>>(matrix_mult->d_X, matrix_mult->d_Y, matrix_mult->d_Z, matrix_mult->COL_X, matrix_mult->COL_Y);
 	cudaDeviceSynchronize();
+}
+
+void check_matrix_multiplication_result(const int trial_num){
+	unsigned int seed = chrono::system_clock::now().time_since_epoch().count();
+	mt19937 gen(seed);
+	uniform_int_distribution<mt19937::result_type> dist_for_element(1,50);
+	uniform_int_distribution<mt19937::result_type> dist_for_dim(3000, 4000);
+
+	for(int trial_count = 0; trial_count < trial_num; trial_count++){
+		int ROW_X, COL_X, ROW_Y, COL_Y;
+		
+		ROW_X = dist_for_dim(gen);
+		COL_X = ROW_Y = dist_for_dim(gen);
+		COL_Y = dist_for_dim(gen);
+	
+		Matrix_multiplication *test_matrix_mult = new Matrix_multiplication(ROW_X, COL_X, ROW_Y, COL_Y);
+
+		// INITIALIZATION TWO MATRIX
+		for (int i = 0; i < ROW_X * COL_X; i++){ test_matrix_mult->h_X[i] = DATA_TYPE(dist_for_element(gen));}
+		for (int i = 0; i < ROW_Y * COL_Y; i++){ test_matrix_mult->h_Y[i] = DATA_TYPE(dist_for_element(gen));}
+
+		matrix_data_transfer_to_device(test_matrix_mult);
+		call_naive_matrix_muliplication_kernel(test_matrix_mult);
+		cudaMemcpy(test_matrix_mult->h_Z, test_matrix_mult->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
+
+		bool check_result = true;
+
+		for (int i = 0; i < ROW_X * COL_Y; i++){
+			if (test_matrix_mult->h_Z[i] != test_matrix_mult->h_Z[i]){
+				cout << "Trial num " << trial_count + 1  <<" : not identical matrix result" << endl;
+				check_result = false;
+				break;
+			} 
+		}
+
+		if (check_result) cout << "Trial num " << trial_count + 1  <<" : identical matrix result" << endl;
+		delete matrix_mult;
+	}
 }
 
 int main (){
@@ -118,55 +184,45 @@ int main (){
 
 	std::chrono::time_point<std::chrono::system_clock> matrix_multiplication_kernel_start_time;
 	
-	Matrix *matrix = new Matrix();
+	Matrix_multiplication *matrix_mult = new Matrix_multiplication();
 
-	const int ROW_X = matrix->ROW_X;
-	const int COL_X = matrix->COL_X;
-	const int ROW_Y = matrix->ROW_Y;
-	const int COL_Y = matrix->COL_Y;
-
-	matrix->h_X = new float[ROW_X * COL_X];
-	matrix->h_Y = new float[ROW_Y * COL_Y];
-	matrix->h_Z = new float[COL_X * ROW_Y];
+	const int ROW_X = matrix_mult->ROW_X;
+	const int COL_X = matrix_mult->COL_X;
+	const int ROW_Y = matrix_mult->ROW_Y;
+	const int COL_Y = matrix_mult->COL_Y;
 	
 	// INITIALIZATION TWO MATRIX
-	for (int i = 0; i < ROW_X * COL_X; i++){ matrix->h_X[i] = float(1);}
-	for (int i = 0; i < ROW_Y * COL_Y; i++){ matrix->h_Y[i] = float(1);}
-	for (int i = 0; i < ROW_X * COL_Y; i++){ matrix->h_Z[i] = float(0);}	
+	for (int i = 0; i < ROW_X * COL_X; i++){ matrix_mult->h_X[i] = DATA_TYPE(1);}
+	for (int i = 0; i < ROW_Y * COL_Y; i++){ matrix_mult->h_Y[i] = DATA_TYPE(1);}
 
-	// ALLOCATE MEMORY TO DEVICE
-	cudaMalloc((void**) &(matrix->d_X), sizeof(float) * ROW_X * COL_X);
-	cudaMalloc((void**) &(matrix->d_Y), sizeof(float) * ROW_Y * COL_Y);
-	cudaMalloc((void**) &(matrix->d_Z), sizeof(float) * ROW_X * COL_Y);
-
-	// COPY MEMORY FROM HOST TO DEVICE
-	cudaMemcpy(matrix->d_X, matrix->h_X, sizeof(float) * ROW_X * COL_X, cudaMemcpyDefault);
-	cudaMemcpy(matrix->d_Y, matrix->h_Y, sizeof(float) * ROW_Y * COL_Y, cudaMemcpyDefault);
-	cudaMemcpy(matrix->d_Z, matrix->h_Z, sizeof(float) * ROW_X * COL_Y, cudaMemcpyDefault);
+	// TRANSFER DATA IN MATRIX MULTIPLICATION TO DEVICE 
+	matrix_data_transfer_to_device(matrix_mult);
 	
-
 	// CALL NAIVE MATRIX MULTIPLICATION KERNEL
 	matrix_multiplication_kernel_start_time = std::chrono::system_clock::now();
-	call_naive_matrix_muliplication_kernel(matrix);
+	call_naive_matrix_muliplication_kernel(matrix_mult);
 	naive_matrix_multiplication_kernel_execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - matrix_multiplication_kernel_start_time);
 	cout << "naive Matrix multiplication kernel execution time : " << naive_matrix_multiplication_kernel_execution_time.count() << "ms" << endl;
 	// COPY RESULT MATRIX FROM DEVICE TO HOST
-	cudaMemcpy(matrix->h_Z, matrix->d_Z, sizeof(float) * ROW_X * COL_Y, cudaMemcpyDefault);
+	cudaMemcpy(matrix_mult->h_Z, matrix_mult->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
 	for (int i = 0 ; i <100; i++){
-		cout << matrix->h_Z[i] << " ";
+		cout << matrix_mult->h_Z[i] << " ";
 	}
 	// CALL TILED MATRIX MULIPLICATION KERNEL 
 	matrix_multiplication_kernel_start_time = std::chrono::system_clock::now();
-	call_tiled_matrix_multiplication_kernel(matrix);
+	call_tiled_matrix_multiplication_kernel(matrix_mult);
 	tiled_matrix_multiplication_kernel_execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - matrix_multiplication_kernel_start_time);
 	cout << "tiled Matrix multiplication kernel execution time : " << tiled_matrix_multiplication_kernel_execution_time.count() << "ms" << endl;
 	// COPY RESULT MATRIX FROM DEVICE TO HOST
-	cudaMemcpy(matrix->h_Z, matrix->d_Z, sizeof(float) * ROW_X * COL_Y, cudaMemcpyDefault);
+	cudaMemcpy(matrix_mult->h_Z, matrix_mult->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
 
 	// for (int i = 0 ; i <100; i++){
 	// 	cout << matrix->h_Z[i] << " ";
 	// }
 
-	delete matrix;
+	cout << "Matrix multiplication test :" << endl;
+	check_matrix_multiplication_result(10);
+
+	delete matrix_mult;
 	return 0;
 }
