@@ -181,11 +181,11 @@ void check_matrix_multiplication_result(const int trial_num){
 		matrix_data_transfer_to_device(test_matrix_mult2);
 
 		call_naive_matrix_multiplication_kernel(test_matrix_mult);
-		//call_tiled_matrix_multiplication_kernel(test_matrix_mult2);
+		call_tiled_matrix_multiplication_kernel(test_matrix_mult2);
 
 		cudaMemcpy(test_matrix_mult->h_Z, test_matrix_mult->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
+		cudaMemcpy(test_matrix_mult2->h_Z, test_matrix_mult2->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
 		
-		//cudaMemcpy(test_matrix_mult2->h_Z, test_matrix_mult2->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
 		// cout << "=== Check pointer ===" << endl;
 		// cout << test_matrix_mult->h_X << endl;
 		// cout << test_matrix_mult->h_Y << endl;
@@ -217,21 +217,20 @@ void check_matrix_multiplication_result(const int trial_num){
 			}
 		}
 
-		if(check_result) cout << "Trial num " << trial_count + 1 << " : identical matrix multiplication result" << endl;
-		else cout << "Trial num " << trial_count + 1 << " : not identical matrix multiplication result" << endl;
-		// bool check_result = true;
+		if(check_result) cout << "Trial num " << trial_count + 1 << " : identical matrix multiplication result(naive, eigen)" << endl;
+		else cout << "Trial num " << trial_count + 1 << " : not identical matrix multiplication result(naive, eigen)" << endl;
+		
+		check_result = true;
 
-		// for (int i = 0; i < ROW_X * COL_Y; i++){
-		// 	if (test_matrix_mult->h_Z[i] != test_matrix_mult2->h_Z[i]){
-		// 		cout << "Trial num " << trial_count + 1  <<" : not identical matrix result" << endl;
-		// 		cout << "Elements number " << i+1 << ": " <<test_matrix_mult->h_Z[i] << " and " << test_matrix_mult2->h_Z[i] <<endl;
+		for (int i = 0; i < ROW_X * COL_Y; i++){
+			if (test_matrix_mult->h_Z[i] != test_matrix_mult2->h_Z[i]){
+				check_result = false;
+				break;
+			} 
+		}
 
-		// 		check_result = false;
-		// 		break;
-		// 	} 
-		// }
-
-		// if (check_result) cout << "Trial num " << trial_count + 1  <<" : identical matrix result" << endl;
+		if (check_result) cout << "Trial num " << trial_count + 1  <<" : identical matrix result(naive, tiled)" << endl;
+		else cout << "Trial num " << trial_count + 1 << " : not identical matrix multiplication result(naive, tiled)" << endl;
 
 		delete test_matrix_mult;
 		delete test_matrix_mult2;
