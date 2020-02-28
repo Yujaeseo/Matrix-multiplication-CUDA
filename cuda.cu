@@ -1,10 +1,11 @@
 #include <iostream>
 #include <chrono>
 #include <random>
+#include <eigen/Sparse>
 using namespace std;
+using namespace Eigen;
 
 #define DATA_TYPE int
-
 typedef struct Matrix_multiplication
 {
 	Matrix_multiplication(): ROW_X(4096), COL_X(4096), ROW_Y(4096), COL_Y(4096){initialize();}
@@ -166,8 +167,7 @@ void check_matrix_multiplication_result(const int trial_num){
 		// COL_X = ROW_Y = dist_for_dim(gen);
 		// COL_Y = dist_for_dim(gen);
 
-		ROW_X = ROW_Y = COL_X = COL_Y = 4096;
-
+		ROW_X = ROW_Y = COL_X = COL_Y = 1024;
 		// MATRIX MULTIPLICATION STRUCT FOR NAIVE KERNEL
 		Matrix_multiplication *test_matrix_mult = new Matrix_multiplication(ROW_X, COL_X, ROW_Y, COL_Y);
 
@@ -181,11 +181,11 @@ void check_matrix_multiplication_result(const int trial_num){
 		matrix_data_transfer_to_device(test_matrix_mult2);
 
 		call_naive_matrix_multiplication_kernel(test_matrix_mult);
-		call_tiled_matrix_multiplication_kernel(test_matrix_mult2);
+		//call_tiled_matrix_multiplication_kernel(test_matrix_mult2);
 
 		cudaMemcpy(test_matrix_mult->h_Z, test_matrix_mult->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
-		cudaMemcpy(test_matrix_mult2->h_Z, test_matrix_mult2->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
-
+		
+		//cudaMemcpy(test_matrix_mult2->h_Z, test_matrix_mult2->d_Z, sizeof(DATA_TYPE) * ROW_X * COL_Y, cudaMemcpyDefault);
 		// cout << "=== Check pointer ===" << endl;
 		// cout << test_matrix_mult->h_X << endl;
 		// cout << test_matrix_mult->h_Y << endl;
@@ -201,19 +201,37 @@ void check_matrix_multiplication_result(const int trial_num){
 		// cout << test_matrix_mult2->d_Y << endl;
 		// cout << test_matrix_mult2->d_Z << endl;
 
+		Matrix<int,-1,-1,RowMajor> matrix_dense_X, matrix_dense_Y, matrix_dense_Z; 
+		
+		matrix_dense_X = Map<Matrix<int,-1,-1,RowMajor>, 0, OuterStride<>>(test_matrix_mult->h_X, ROW_X, COL_X, OuterStride<>(COL_X));
+		matrix_dense_Y = Map<Matrix<int,-1,-1,RowMajor>, 0, OuterStride<>>(test_matrix_mult->h_Y, ROW_Y, COL_Y, OuterStride<>(COL_Y));
+
+		matrix_dense_Z = matrix_dense_X * matrix_dense_Y;
+
 		bool check_result = true;
-
 		for (int i = 0; i < ROW_X * COL_Y; i++){
-			if (test_matrix_mult->h_Z[i] != test_matrix_mult2->h_Z[i]){
-				cout << "Trial num " << trial_count + 1  <<" : not identical matrix result" << endl;
-				cout << "Elements number " << i+1 << ": " <<test_matrix_mult->h_Z[i] << " and " << test_matrix_mult2->h_Z[i] <<endl;
-
+			//cout << test_matrix_mult->h_Z[i] << " " << matrix_dense_Z(i/COL_Y,i%COL_Y) << endl;
+			if (matrix_dense_Z(i/COL_Y,i%COL_Y) != test_matrix_mult->h_Z[i]){
 				check_result = false;
 				break;
-			} 
+			}
 		}
 
-		if (check_result) cout << "Trial num " << trial_count + 1  <<" : identical matrix result" << endl;
+		if(check_result) cout << "Trial num " << trial_count + 1 << " : identical matrix multiplication result" << endl;
+		else cout << "Trial num " << trial_count + 1 << " : not identical matrix multiplication result" << endl;
+		// bool check_result = true;
+
+		// for (int i = 0; i < ROW_X * COL_Y; i++){
+		// 	if (test_matrix_mult->h_Z[i] != test_matrix_mult2->h_Z[i]){
+		// 		cout << "Trial num " << trial_count + 1  <<" : not identical matrix result" << endl;
+		// 		cout << "Elements number " << i+1 << ": " <<test_matrix_mult->h_Z[i] << " and " << test_matrix_mult2->h_Z[i] <<endl;
+
+		// 		check_result = false;
+		// 		break;
+		// 	} 
+		// }
+
+		// if (check_result) cout << "Trial num " << trial_count + 1  <<" : identical matrix result" << endl;
 
 		delete test_matrix_mult;
 		delete test_matrix_mult2;
