@@ -86,7 +86,7 @@ void naive_matrix_multiplication
 	d_Z[global_th_id] = temp;
 }
 
-// GPU KERNEL KERNEL USING TILING
+// GPU TILED KERNEL
 __global__
 void tiled_matrix_multiplication
 (
@@ -156,7 +156,7 @@ void call_naive_matrix_multiplication_kernel(Matrix_multiplication* matrix_mult)
 	cudaDeviceSynchronize();
 }
 
-// EXECUTE MATRIX MULTIPLICATION KERNEL USING TILING TECHNIQUE 
+// EXECUTE TILED MATRIX MULTIPLICATION KERNEL 
 void call_tiled_matrix_multiplication_kernel(Matrix_multiplication* matrix_mult){
 	dim3 blocks((matrix_mult->COL_Y + WIDTH_TILE - 1) /WIDTH_TILE,(matrix_mult->ROW_X + WIDTH_TILE - 1) /WIDTH_TILE);
 	dim3 threads(WIDTH_TILE, WIDTH_TILE);
